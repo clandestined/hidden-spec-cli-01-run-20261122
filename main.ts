@@ -46,6 +46,24 @@ class Tree {
   readonly now = new Map<string, string | null>();
   /** Where a path's content moved from: for a move target, the path it was moved from (chained). */
   readonly origin = new Map<string, string>();
+  private readonly dirCache = new Map<string, boolean>();
+  /** Whether a path exists on disk as a directory (the tree only holds files). */
+  isDir(p: string): boolean {
+    if (!this.dirCache.has(p)) {
+      let v = false;
+      try {
+        v = statSync(p).isDirectory();
+      } catch {
+        v = false;
+      }
+      this.dirCache.set(p, v);
+    }
+    return this.dirCache.get(p)!;
+  }
+  /** Whether a path exists: a file in the tree, or a directory on disk. */
+  exists(p: string): boolean {
+    return this.get(p) !== null || this.isDir(p);
+  }
   original(p: string): string | null {
     if (!this.orig.has(p)) {
       let v: string | null = null;
@@ -208,7 +226,7 @@ function jsonEdit(v: unknown): Edit | null {
     const text = o.file_text;
     return (tree) => {
       if (!safe(p)) throw new Fail('unsafe', p);
-      if (tree.get(p) !== null) throw new Fail('exists', p);
+      if (tree.exists(p)) throw new Fail('exists', p);
       tree.now.set(p, text);
     };
   }
@@ -518,7 +536,7 @@ function sectionEdit(s: Section, strict: boolean): Edit {
     if (s.creation || oldP === null) {
       const p = newP;
       if (p === null) return;
-      if (tree.get(p) !== null) throw new Fail('exists', p);
+      if (tree.exists(p)) throw new Fail('exists', p);
       const plus: string[] = [];
       let noEol = false;
       for (const h of s.hunks) {
@@ -541,7 +559,7 @@ function sectionEdit(s: Section, strict: boolean): Edit {
     }
     if (oldP !== null && newP !== null && oldP !== newP) {
       if (tree.get(oldP) === null) throw new Fail('missing', oldP);
-      if (tree.get(newP) !== null) throw new Fail('exists', newP);
+      if (tree.exists(newP)) throw new Fail('exists', newP);
       const { lines, br, final } = fileLines(tree.get(oldP)!);
       const res = applyHunks(lines, final, s.hunks, oldP, strict);
       tree.move(oldP, newP, joinLines(res.lines, br, res.final));
@@ -605,7 +623,7 @@ function searchReplaceEdits(lines: string[], strict: boolean): Edit[] {
     edits.push((tree) => {
       if (!safe(p)) throw new Fail('unsafe', p);
       if (oldLines.length === 0) {
-        if (tree.get(p) !== null) throw new Fail('exists', p);
+        if (tree.exists(p)) throw new Fail('exists', p);
         tree.put(p, newLines.length === 0 ? '' : newLines.join('\n') + '\n');
         return;
       }
@@ -708,7 +726,7 @@ function v4aSectionEdit(
     }
     return (tree) => {
       if (!safe(path)) throw new Fail('unsafe', path);
-      if (tree.get(path) !== null) throw new Fail('exists', path);
+      if (tree.exists(path)) throw new Fail('exists', path);
       tree.put(path, fileLinesOut.length === 0 ? '' : fileLinesOut.join('\n') + '\n');
     };
   }
@@ -763,7 +781,7 @@ function v4aSectionEdit(
     if (to !== null && !safe(to)) throw new Fail('unsafe', to);
     const curText = tree.get(path);
     if (curText === null) throw new Fail('missing', path);
-    if (to !== null && tree.get(to) !== null) throw new Fail('exists', to);
+    if (to !== null && tree.exists(to)) throw new Fail('exists', to);
     let { lines: fl, br, final } = fileLines(curText);
     let cursor = 0;
     for (const ch of chunks) {
